@@ -1,0 +1,248 @@
+---
+title: "Homicide Reports, 1980-2014"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(rvest)
+library(stringr)
+library(rpart)
+library(broom)
+library(caret)
+```
+
+**John Mattingly, Coooper Teich**
+
+## Introduction
+Do you know how months of the year and murders correlate to one another? Using information made available by the Murder Accountability Project we can attempt to answer this question. We will begin by showing you how to import this data into your R Markdown file and then put it into machine readable form. Then we will show you how to process the data and do some exploratory analysis and visualization in order to create your hypotheses for the data. Next, we will show you how to test these hypotheses using machine learning.
+
+## Required Tools 
+We recommend you use RStudio (https://www.rstudio.com/) to run your code.
+
+You will also need the Homicide Reports dataset, which can be obtained at https://www.kaggle.com/murderaccountability/homicide-reports.
+
+## 1. Getting Started
+First, download the dataset from https://www.kaggle.com/murderaccountability/homicide-reports. This dataset will first be in the form of a .zip called homicide-reports.zip. Create an R Markdown file and save it into a new folder. Extract the zip into the new folder in order to obtain the CSV (comma-separated values file) called database.csv, which holds the data. The tidyverse library allows us to use the "read_csv" function, which will put the data into a table. 
+
+```{r table}
+murders <- read_csv("database.csv")
+murders
+```
+
+## 1.1 Looking at our data
+Now we have a data frame called murders to represent our data. Here we can see the different values under each of the different columns with missing data included as Unknown or 0.
+
+## 1.2 Tidying our data
+When graphing our data we need a way to order that data by Month, however Month's are represented by strings. In order to solve this problem we will add a new column representing Months through numerical values out of the 12 months of the year. We use the mutate function along with a variable holding each month in order to add a column to the table representing the month as an int.
+```{r add_month_num}
+months <- c("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+mut_murders <- murders %>%
+  mutate(Month_num = sapply(Month, function(month) {which(month == months)})) 
+mut_murders
+```
+
+# 2 Exploratory Data Analysis
+Now that we have tidied our data, we can begin analyzing it. This will help reveal general trends and patterns in our data which will lead us to potential hypotheses. We will choose a few different ways to group the data that may assist us in recognizing such trends.
+
+## 2.1 Month Based Visualization
+Since our data is recorded down to the month we can see whether homicides are more frequent during specific months of the year. 
+
+### 2.1.1 Grouping our data
+First, we will group our data by month and year in order to the view total murders per month per year. We will use the "group_by" function that will lets us group rows with the same month and year into one row. Read more about group_by here: https://dplyr.tidyverse.org/reference/group_by.html. We will then use the "summarize" function that will find the total murders for said grouping and add it to the "murders" column. Read more about summarize here: https://www.rdocumentation.org/packages/Hmisc/versions/4.2-0/topics/summarize. 
+```{r murders_by_month}
+murders_by_month <- mut_murders %>%
+  group_by(Month, Year, Month_num) %>%
+  summarise(murders = n())
+murders_by_month 
+```
+
+### 2.1.2 Plotting our data 
+This plot will show us total points for each year representing total murders in a given month. We will order the data by month using the "arrange" function and then graph it with a scatterplot using "ggplot" (graphing murders vs month). Learn more about ggplot here: https://www.rdocumentation.org/packages/ggplot2/versions/3.1.1/topics/ggplot.
+```{r}
+by_month_plot <- murders_by_month %>%
+  arrange(Month_num) %>%
+  ggplot(aes(Month_num, murders)) +
+  geom_point() 
+by_month_plot
+```
+
+### 2.1.3 Analyzing our plot
+Based on this plot it seems as though there is some relation between murders and month_num, however, further analyzation is required to confirm this.
+
+## 2.2 Year Based Visualization 
+We can group data by the year in order to see if there have been changes in total homicides over time.
+
+### 2.2.1 Plotting our data
+Using the same grouping from above, we can create a plot representing murders each year with a point for each month of the year. This plot will be created using the same functions as above but arranging by year and plotting year vs murders.
+```{r}
+by_year_plot <- murders_by_month %>%
+  arrange(Year) %>%
+  ggplot(aes(Year, murders)) +
+  geom_point() 
+by_year_plot
+```
+
+### 2.2.2 Analyzing our plot
+Based on this plot it seems that overall murders each year have been on the decline so there is some relation between the two. Again, further analyzation is necessary in order to determine the value of this data.
+
+## 2.3 State Based Visualization
+Grouping our data by states will show us how states compares to one another when it comes to total homicides.
+
+#### 2.3.1 Plotting our data
+Using the same methods mentioned above, we are able to create a plot that displays states vs murders (with a dot representing total deaths for each month).
+```{r}
+by_state_plot <- mut_murders %>%
+  group_by(State, Month) %>%
+  summarise(murders = n()) %>%
+  arrange(State) %>% 
+  ggplot(aes(State, murders)) +
+  geom_point()  +
+  theme(axis.text.x=element_text(angle=90, hjust=1))
+by_state_plot
+```
+
+### 2.3.2 Analyzing our plot
+This plot shows us there is a clear discrepency in total homicides of each state. This could be attributed to a variety of factors, such as population or average income, unfortunately this dataset does not contain such data. It may be helpful to evaluate each state individually in any further data analyzation.
+
+
+# 3 Machine Learning
+The goal of machine learning is to discover patterns in your data and use them to make predictions.
+
+## 3.1 Choosing our Hypothesis
+First, we need to choose what we would like to predict using our data. Based on the visualizations above, it seems that Month based visualizations would be the most useful grouping of data for predicting homicide occurrences. Thus, using trends of total homicides per month our machine learning predictor will be able to take a month, and output an estimate of total homicides by the end of said month.
+
+We must now develop a hypothesis using our selected data. Because our data does not seem to follow any common functions we'll need to create a polynomial that can predict total deaths in a given month. 
+
+## 3.2 Linear Regression Model
+We will create a linear regression model using the poly function in order to graph a line through the data that will allow us to generate our polynomial.
+```{r}
+by_month_plot + 
+  geom_smooth(method = lm, formula = y ~ poly(x, degree = 3)) +
+  xlab("Month")
+```
+
+## 3.3 Polynomial Fit
+Now, we must find which degree of the polynomial produces the best fit model for our data.  Obviously the easiest way to do this is to create models for each possible degree and compare the models, we will look at only up to 11 degrees as there is only 12 months (data points) in a year.  Now we must figure out how to asses each model, we have chosen to do thish with a k-fold Cross-Validation.  This means we split our data set into k groups and uses k-1 of those groups to train our model, and then use the remaining group to test its accuraccy.  This allows us to test how well a model we build with our data will be at predicting results for data it hasn't been trained on.
+
+The metric we will use to evaluate a model is residual sum squared (RSS), as it represents how close our predictions normally are.  For each degree the RSS for the model generated by every fold will be averaged such that every degree is associated with an average RSS, treated as the error.  The degree with the smallest error is chosen to be the degree of our fit.
+```{r poly_find}
+degrees <- seq(1, 11)
+train_errors <- rep(0,11)
+validate_errors <- rep(0,11)
+k <- 50
+folds <- createFolds(murders_by_month$murders, k = k, list = TRUE, returnTrain = FALSE)
+
+for (deg in degrees) {
+  train_error = 0
+  validate_error = 0
+  
+  for (fold in folds) {
+    train_data = murders_by_month[-fold,]
+    validate_data = murders_by_month[fold,]
+    
+    model_poly <- lm(murders~poly(Month_num, degree=deg), data = train_data)
+    
+    train_predict = predict(model_poly, newdata = train_data)
+    train_error = train_error + mean((train_data$murders - train_predict)^2)
+    
+    validate_predict = predict(model_poly, newdata = validate_data)
+    validate_error = validate_error + mean((validate_data$murders - validate_predict)^2)
+  }
+  train_errors[deg] = train_error/k
+  validate_errors[deg] = validate_error/k
+}
+
+
+plot(degrees, train_errors, type="b", xlab="Polynomial Degree", ylab="Mean Squared Error", col="blue")
+lines(degrees, validate_errors, type="b", col = "red")
+legend("topright", inset = .02, legend = c("Training Error", "Validation Error"), col = c("blue", "red"), lty = c(1,1))
+
+best_deg <- which.min(validate_errors)
+best_deg
+
+by_month_plot +
+  geom_smooth(method = lm, formula = y ~ poly(x, degree = best_deg))
+```
+
+
+
+
+# 4 Hypothesis Testing
+The primary question we wish to answer is if there is a relationship between month and number of homicides. If not we would accept the null hypothesis, stating there is no relation between the 2 elements. 
+```{r hypothesis_test}
+best_model <- lm(murders~poly(Month_num, degree = best_deg), data = murders_by_month)
+
+summary(best_model)
+```
+
+## 4.1 Splitting our Data
+Since our p value is < 0.05 we can reject the null hypothesis and say there is a relationship between month and total homicides. However, our small R^2 value tells us that this isn't a strong relationship. This issue follows from the plot obtained in section 2.3, which showed us each state's data should be evaluated seperately.  Thus, we will split the data so that there is a polynomial for each state using the same month vs total homicide relationship.  For the sake of efficiency we will assume that each state's model will be of the degree so we don't have to optimize the degree of the fit for all 50 states.
+```{r by_state}
+murders_by_month_state <- mut_murders %>%
+  group_by(Month, Year, Month_num, State) %>%
+  summarise(murders = n())
+murders_by_month_state
+```
+
+```{r by_state_poly_find}
+train_errors <- rep(0,11)
+validate_errors <- rep(0,11)
+k <- 10
+folds <- createFolds(murders_by_month_state$murders, k = k, list = TRUE, returnTrain = FALSE)
+
+for (deg in degrees) {
+  train_error = 0
+  validate_error = 0
+  
+  for (fold in folds) {
+    train_data = murders_by_month_state[-fold,]
+    validate_data = murders_by_month_state[fold,]
+    
+    model_poly <- lm(murders~poly(Month_num, degree=deg)*State, data = train_data)
+    
+    train_predict = predict(model_poly, newdata = train_data)
+    train_error = train_error + mean((train_data$murders - train_predict)^2)
+    
+    validate_predict = predict(model_poly, newdata = validate_data)
+    validate_error = validate_error + mean((validate_data$murders - validate_predict)^2)
+  }
+  train_errors[deg] = train_error/k
+  validate_errors[deg] = validate_error/k
+}
+
+best_deg <- which.min(validate_errors)
+best_deg
+
+plot(degrees, train_errors, type="b", xlab="Polynomial Degree", ylab="Mean Squared Error", col="blue")
+lines(degrees, validate_errors, type="b", col = "red")
+legend("topright", inset = .02, legend = c("Training Error", "Validation Error"), col = c("blue", "red"), lty = c(1,1))
+```
+
+## 4.2 New Model
+Now that we have a will make the new model, we will evaluate the model's R^2 and p-value
+```{r new_model}
+best_model <- lm(murders~poly(Month_num, degree = best_deg)*State, data = murders_by_month_state)
+
+summary(best_model)
+```
+
+Now, there is a much higher R^2, which indicates a much higher quality of fit, and as expected the p-value is still < 0.05.
+
+# Conclusion
+Knowing the likely amount of homicides in any given month is a very useful statistic as it can reveal the causes of such deaths. If certain months tend to have more homicides than others there is likely something behind this peak in murders. 
+
+Based on our linear regression model we have found that summer months seem to contain the largest amount of homicides over the course of the year. This information may not be very useful to the general public, however, the government could benefit from this information if they were able to discover the cause(s). They could then enact policies or make changes in the country that would prevent this increase in deaths from occurring. 
+
+There are a variety of other factors in this dataset that were not explored. Some other factors we could have incorporated into our analysis are age or relationship, in order to see if there was further correlations between these aspects and our findings. We hope our readers will download this dataset in order to further explore the wide variety of relationships that this data could reveal. 
+
+### **References** 
+
+* Plotting http://r-statistics.co/ggplot2-Tutorial-With-R.html
+* Homicide Reports Dataset https://www.kaggle.com/murderaccountability/homicide-reports
+* Linear Regression Model http://r-statistics.co/Linear-Regression.html
+* R^2 testing http://blog.minitab.com/blog/adventures-in-statistics-2/regression-analysis-how-do-i-interpret-r-squared-and-assess-the-goodness-of-fit
+
+
+
